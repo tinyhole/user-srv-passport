@@ -1,0 +1,7 @@
+registry:
+  address: 0.0.0.0:8500
+
+log:
+  path: log
+  level: debug
+  fileSize: 1024000

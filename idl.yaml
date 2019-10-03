@@ -1,0 +1,5 @@
+protos:
+  - platform/user_srv_passport.proto
+  - platform/id_srv_snowflake.proto
+
+rel: "github.com/tinyhole/user-srv-passport"
