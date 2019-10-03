@@ -39,6 +39,8 @@ type PassportService interface {
 	SignUp(ctx context.Context, in *SignUpReq, opts ...client.CallOption) (*SignUpRsp, error)
 	// 微信登陆，暂时只做这个登陆
 	WeChatSignIn(ctx context.Context, in *WeChatSignInReq, opts ...client.CallOption) (*WeChatSignInRsp, error)
+	// 登陆
+	MobileSignIn(ctx context.Context, in *MobileSignInReq, opts ...client.CallOption) (*MobileSignInRsp, error)
 }
 
 type passportService struct {
@@ -79,6 +81,16 @@ func (c *passportService) WeChatSignIn(ctx context.Context, in *WeChatSignInReq,
 	return out, nil
 }
 
+func (c *passportService) MobileSignIn(ctx context.Context, in *MobileSignInReq, opts ...client.CallOption) (*MobileSignInRsp, error) {
+	req := c.c.NewRequest(c.name, "Passport.MobileSignIn", in)
+	out := new(MobileSignInRsp)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Server API for Passport service
 
 type PassportHandler interface {
@@ -86,12 +98,15 @@ type PassportHandler interface {
 	SignUp(context.Context, *SignUpReq, *SignUpRsp) error
 	// 微信登陆，暂时只做这个登陆
 	WeChatSignIn(context.Context, *WeChatSignInReq, *WeChatSignInRsp) error
+	// 登陆
+	MobileSignIn(context.Context, *MobileSignInReq, *MobileSignInRsp) error
 }
 
 func RegisterPassportHandler(s server.Server, hdlr PassportHandler, opts ...server.HandlerOption) error {
 	type passport interface {
 		SignUp(ctx context.Context, in *SignUpReq, out *SignUpRsp) error
 		WeChatSignIn(ctx context.Context, in *WeChatSignInReq, out *WeChatSignInRsp) error
+		MobileSignIn(ctx context.Context, in *MobileSignInReq, out *MobileSignInRsp) error
 	}
 	type Passport struct {
 		passport
@@ -110,4 +125,8 @@ func (h *passportHandler) SignUp(ctx context.Context, in *SignUpReq, out *SignUp
 
 func (h *passportHandler) WeChatSignIn(ctx context.Context, in *WeChatSignInReq, out *WeChatSignInRsp) error {
 	return h.PassportHandler.WeChatSignIn(ctx, in, out)
+}
+
+func (h *passportHandler) MobileSignIn(ctx context.Context, in *MobileSignInReq, out *MobileSignInRsp) error {
+	return h.PassportHandler.MobileSignIn(ctx, in, out)
 }

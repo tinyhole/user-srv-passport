@@ -17,8 +17,13 @@ func srand(size int) []byte {
 	return buf
 }
 
-func Make(password []byte) (key, salt []byte){
+func MakePassword(password []byte) (key, salt []byte){
 	salt = srand(10)
+	key = argon2.Key(password, salt, 3, 32*1024, 4, 32)
+	return
+}
+
+func MakePasswordBySalt(password []byte, salt []byte) (key []byte) {
 	key = argon2.Key(password, salt, 3, 32*1024, 4, 32)
 	return
 }

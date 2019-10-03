@@ -15,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"io/ioutil"
 	"net/http"
+	"strings"
 )
 
 type Handler struct {}
@@ -27,55 +28,66 @@ func (h *Handler) SignUp(ctx context.Context, req *srv.SignUpReq, rsp *srv.SignU
 	if err != nil {
 		// 这种错误是bug类型错误，不应该出现
 		logrus.Debugf("bad mobile, err:%v", err)
+		rsp.BaseRsp.Code = srv.Code_Failed
 		rsp.BaseRsp.Msg = err.Error()
 		return nil
 	}
 
 	// 检验手机号是否已被注册
+	_, err = db.UserPassportOp.Get(ctx, bson.D{{"mobile", mobile}})
+	if err != nil && err != mongo.ErrNoDocuments {
+		logrus.Error("Failed to get user passport. ", err)
+		return err
+	}
+	// 未注册过
+	if err == mongo.ErrNoDocuments {
+		// TODO 后期再验证短信验证码
+		//if !format.IsDigit(req.Code) {
+		//	logrus.Debugf("bad code %v", req.Code)
+		//	return errors.New("bad code")
+		//}
 
+		if err = util.Password(req.Password); err != nil {
+			// bug 错误
+			logrus.Debugf("bad password. %v", err)
+			rsp.BaseRsp.Msg = err.Error()
+			return nil
+		}
 
-	// TODO 后期再验证短信验证码
-	//if !format.IsDigit(req.Code) {
-	//	logrus.Debugf("bad code %v", req.Code)
-	//	return errors.New("bad code")
-	//}
+		// 生成密码
+		passwd, salt := util.MakePassword([]byte(req.Password))
 
-	if err = util.Password(req.Password); err != nil {
-		// bug 错误
-		logrus.Debugf("bad password. %v", err)
-		rsp.BaseRsp.Msg = err.Error()
+		cl := snowflake.NewSnowFlakeService("platform.id.srv.snowflake", global.PassportSvc.Client())
+		idRsp, err := cl.GetID(ctx, &base.Empty{})
+		if err != nil {
+			// 网络或框架错误，通知框架层错误，做出重试
+			logrus.Errorf("platform.id.srv.snowflake GetID error: %v", err)
+			return err
+		}
+
+		ua := db.UserPassport{
+			UID:		  idRsp.ID,
+			Name:         req.Name,
+			Mobile:       mobile,
+			Email:        req.Email,
+			Password:     string(passwd),
+			Salt:         string(salt),
+			WeChatID: 	  "",
+		}
+		err = db.UserPassportOp.Insert(ctx, &ua)
+		if err != nil {
+			// uid 重复插入失败错误，如何处理
+			logrus.Error("Failed to insert user auth", err)
+			return err
+		}
+
+		rsp.UserID = idRsp.ID
+		rsp.BaseRsp.Code = srv.Code_Ok
 		return nil
 	}
 
-	// 生成密码
-	passwd, salt := util.Make([]byte(req.Password))
-
-	cl := snowflake.NewSnowFlakeService("platform.id.srv.snowflake", global.PassportSvc.Client())
-	idRsp, err := cl.GetID(ctx, &base.Empty{})
-	if err != nil {
-		// 网络或框架错误，通知框架层错误，做出重试
-		logrus.Errorf("platform.id.srv.snowflake GetID error: %v", err)
-		return err
-	}
-
-	ua := db.UserPassport{
-		UID:		  idRsp.ID,
-		Name:         req.Name,
-		Mobile:       mobile,
-		Email:        req.Email,
-		Password:     string(passwd),
-		Salt:         string(salt),
-		WeChatID: 	  "",
-	}
-	err = db.UserPassportOp.Insert(ctx, &ua)
-	if err != nil {
-		// uid 重复插入失败错误，如何处理
-		logrus.Error("Failed to insert user auth", err)
-		return err
-	}
-
-	rsp.UserID = idRsp.ID
-	rsp.BaseRsp.Code = srv.Code_Ok
+	// 手机号已注册
+	rsp.BaseRsp.Code = srv.Code_MobileAlreadySignedUp
 	return nil
 }
 
@@ -174,11 +186,50 @@ func (h *Handler) WeChatSignIn(ctx context.Context, req *srv.WeChatSignInReq, rs
 
 	return nil
 }
-//
-//func (h *Handler) MobileSignIn(ctx context.Context, req *srv.MobileSignInReq, rsp *srv.MobileSignInResp) error {
-//
-//	return nil
-//}
+
+func (h *Handler) MobileSignIn(ctx context.Context, req *srv.MobileSignInReq, rsp *srv.MobileSignInRsp) error {
+	rsp.BaseRsp = &srv.BaseRsp{
+		Code: srv.Code_Failed,
+	}
+	mobile, err := util.Mobile(req.Mobile)
+	if err != nil {
+		// 这种错误是bug类型错误，不应该出现
+		logrus.Debugf("bad mobile, err:%v", err)
+		rsp.BaseRsp.Code = srv.Code_Failed
+		rsp.BaseRsp.Msg = err.Error()
+		return nil
+	}
+
+	if err = util.Password(req.Password); err != nil {
+		// bug 错误
+		logrus.Debugf("bad password. %v", err)
+		rsp.BaseRsp.Msg = err.Error()
+		return nil
+	}
+	// 检验手机号是否已注册
+	up, err := db.UserPassportOp.Get(ctx, bson.D{{"mobile", mobile}})
+	if err != nil && err != mongo.ErrNoDocuments || up == nil {
+		logrus.Error("Failed to get user passport. ", err)
+		return err
+	}
+	if err == mongo.ErrNoDocuments {
+		logrus.Debug("incorrect mobile. ", mobile)
+		rsp.BaseRsp.Code = srv.Code_IncorrectMobileOrPassword
+		return nil
+	}
+
+	// 校验密码
+	password := util.MakePasswordBySalt([]byte(req.Password), []byte(up.Salt))
+	if strings.Compare(string(up.Password), string(password)) != 0 {
+		logrus.Debug("incorrect password")
+		rsp.BaseRsp.Code = srv.Code_IncorrectMobileOrPassword
+		return nil
+	}
+
+	rsp.UserID = up.UID
+	rsp.BaseRsp.Code = srv.Code_Ok
+	return nil
+}
 //
 //func (h *Handler) EmailSignIn(ctx context.Context, req *srv.EmailSignInReq, rsp *srv.EmailSignInResp) error {
 //
